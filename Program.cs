@@ -311,41 +311,19 @@ namespace RarZipProcessor
 
                 Console.WriteLine($"  -- Re-zip: all {zipFiles.Length} folder(s) would be re-zipped to {(_outputPath ?? "root folder")}");
                 string outputDir = _outputPath ?? folder;
-                foreach (string zipPath in zipFiles.OrderBy(z => z, StringComparer.OrdinalIgnoreCase))
+                string folderName = Path.GetFileName(folder);
+                Console.WriteLine($"    {folderName}.zip -> {folderName}.zip");
+                Console.WriteLine($"      (from {zipFiles.Length} ZIP file(s) in {folderName}/)");
+                foreach (string zipPath in zipFiles.OrderBy(z => z, StringComparer.OrdinalIgnoreCase).Take(5))
                 {
-                    string baseName = Path.GetFileNameWithoutExtension(zipPath);
-                    string outputZipPath = Path.Combine(outputDir, $"{baseName}.zip");
-                    Console.WriteLine($"    {Path.GetFileName(zipPath)} -> {Path.GetFileName(outputZipPath)}");
-                    Console.WriteLine($"      (from {baseName}/ subfolder)");
-
-                    // List files that would be in the re-zipped version.
-                    if (filesByZip.TryGetValue(Path.GetFileName(zipPath), out var filesForZip))
-                    {
-                        var rarInZip = filesForZip.Where(f => IsRarVolumeFromPath(f.entryPath)).ToList();
-                        var nonRarInZip = filesForZip.Where(f => !IsRarVolumeFromPath(f.entryPath)).ToList();
-
-                        if (rarInZip.Count > 0)
-                        {
-                            Console.WriteLine($"      RAR volumes extracted from: {rarInZip.Count} file(s)");
-                        }
-                        if (nonRarInZip.Count > 0)
-                        {
-                            Console.WriteLine($"      Files from original ZIP: {nonRarInZip.Count} file(s)");
-                            if (_useSubfolder)
-                            {
-                                foreach (var (zipName, entryPath) in nonRarInZip.Take(5))
-                                {
-                                    Console.WriteLine($"        {entryPath}");
-                                }
-                                if (nonRarInZip.Count > 5)
-                                {
-                                    Console.WriteLine($"        ... and {(nonRarInZip.Count - 5)} more");
-                                }
-                            }
-                        }
-                    }
+                    Console.WriteLine($"        {Path.GetFileName(zipPath)}");
+                }
+                if (zipFiles.Length > 5)
+                {
+                    Console.WriteLine($"        ... and {(zipFiles.Length - 5)} more");
                 }
             }
+
             Console.WriteLine();
             Console.WriteLine("---");
             Console.WriteLine();
@@ -601,15 +579,44 @@ namespace RarZipProcessor
 
                 if (_reZip)
                 {
-                    // When re-zipping, zip up each per-zip subfolder instead of deleting.
+                    // When re-zipping, merge all per-zip subfolders into one ZIP named after the folder.
                     string? rezipOutputDir = _outputPath ?? folder;
-                    foreach (string zipExtractDir in extractedZipFolders)
+                    string folderName = Path.GetFileName(folder);
+                    string zipPath = Path.Combine(rezipOutputDir, $"{folderName}.zip");
+                    Console.WriteLine($"  Re-zipping all subfolders -> {Path.GetFileName(zipPath)}");
+
+                    // Collect all files from all subfolders into a temporary staging folder.
+                    string stagingDir = Path.Combine(folder, "_rzp_staging_" + Guid.NewGuid().ToString("N"));
+                    try
                     {
-                        string baseName = Path.GetFileName(zipExtractDir);
-                        string zipPath = Path.Combine(rezipOutputDir, $"{baseName}.zip");
-                        Console.WriteLine($"  Re-zipping: {Path.GetFileName(zipExtractDir)} -> {Path.GetFileName(zipPath)}");
-                        CreateZipFromFolder(zipExtractDir, zipPath);
-                        SafeDeleteDirectory(zipExtractDir);
+                        Directory.CreateDirectory(stagingDir);
+                        foreach (string zipExtractDir in extractedZipFolders)
+                        {
+                            // Move files from each subfolder into staging, preserving structure when --subfolder.
+                            foreach (string file in Directory.GetFiles(zipExtractDir, "*", SearchOption.AllDirectories))
+                            {
+                                string relativePath = _useSubfolder
+                                    ? Path.GetRelativePath(zipExtractDir, file)
+                                    : Path.GetFileName(file);
+                                string destPath = Path.Combine(stagingDir, relativePath);
+                                destPath = MakeUniquePath(destPath);
+                                string? parentDir = Path.GetDirectoryName(destPath);
+                                if (!string.IsNullOrEmpty(parentDir) && !Directory.Exists(parentDir))
+                                {
+                                    Directory.CreateDirectory(parentDir);
+                                }
+                                File.Move(file, destPath);
+                            }
+                            // Delete the individual subfolder.
+                            SafeDeleteDirectory(zipExtractDir);
+                        }
+
+                        // Create the merged ZIP.
+                        CreateZipFromFolder(stagingDir, zipPath);
+                    }
+                    finally
+                    {
+                        SafeDeleteDirectory(stagingDir);
                     }
                 }
                 else
