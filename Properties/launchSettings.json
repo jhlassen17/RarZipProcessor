@@ -6,7 +6,7 @@
     },
     "Abandoned Dry": {
       "commandName": "Project",
-      "commandLineArgs": "\"G:\\jeff\\files\\Downloads\\forensic\\~user\\Downloads\\Torrentleech Pc Retro Pack 1993\" --dry-run --reZip --subfolder"
+      "commandLineArgs": "\"G:\\jeff\\files\\Downloads\\forensic\\~user\\Downloads\\Torrentleech Pc Retro Pack 1993\" --dry-run --reZip --subfolder --output \"M:\\jeff\\files\\Games\\tmp\""
     }
   }
 }

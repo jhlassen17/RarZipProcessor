@@ -19,16 +19,18 @@ namespace RarZipProcessor
         private static bool _useSubfolder = false;
         private static bool _dryRun = false;
         private static bool _reZip = false;
+        private static string? _outputPath = null;
 
         private static void Main(string[] args)
         {
             if (args.Length < 1)
             {
-                Console.WriteLine("Usage: RarZipProcessor <root-folder> [--subfolder] [--dry-run] [--rezip] [path-to-7z-or-unrar]");
+                Console.WriteLine("Usage: RarZipProcessor <root-folder> [--subfolder] [--dry-run] [--rezip] [--output <path>] [path-to-7z-or-unrar]");
                 return;
             }
 
             var nonFlagArgs = new List<string>();
+            var outputDir = string.Empty;
             foreach (var arg in args)
             {
                 if (arg.Equals("--subfolder", StringComparison.OrdinalIgnoreCase))
@@ -43,15 +45,47 @@ namespace RarZipProcessor
                 {
                     _reZip = true;
                 }
+                else if (arg.StartsWith("--output", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Extract the path from --output <path> or --output=<path>
+                    string argValue = arg.Substring("--output".Length).Trim();
+                    if (argValue.StartsWith("=", StringComparison.Ordinal) && argValue.Length > 1)
+                    {
+                        outputDir = argValue.Substring(1);
+                    }
+                    else if (argValue.Length > 0)
+                    {
+                        outputDir = argValue;
+                    }
+                }
                 else
                 {
                     nonFlagArgs.Add(arg);
                 }
             }
 
+            // Handle --output <path> form (two separate args)
+            if (string.IsNullOrEmpty(outputDir) && nonFlagArgs.Count >= 2)
+            {
+                for (int i = 1; i < nonFlagArgs.Count; i++)
+                {
+                    if (nonFlagArgs[i].Equals("--output", StringComparison.OrdinalIgnoreCase) ||
+                        nonFlagArgs[i].Equals("--output=", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (i + 1 < nonFlagArgs.Count)
+                        {
+                            outputDir = nonFlagArgs[i + 1];
+                        }
+                        break;
+                    }
+                }
+            }
+
+            _outputPath = string.IsNullOrEmpty(outputDir) ? null : outputDir;
+
             if (nonFlagArgs.Count < 1)
             {
-                Console.WriteLine("Usage: RarZipProcessor <root-folder> [--subfolder] [--dry-run] [--rezip] [path-to-7z-or-unrar]");
+                Console.WriteLine("Usage: RarZipProcessor <root-folder> [--subfolder] [--dry-run] [--rezip] [--output <path>] [path-to-7z-or-unrar]");
                 return;
             }
 
@@ -80,6 +114,7 @@ namespace RarZipProcessor
             Console.WriteLine($"Subfolder mode: {_useSubfolder}");
             Console.WriteLine($"Dry-run mode: {_dryRun}");
             Console.WriteLine($"Re-zip mode: {_reZip}");
+            Console.WriteLine($"Output dir: {(_outputPath ?? "same as root")}");
             Console.WriteLine();
 
             if (_dryRun)
@@ -232,8 +267,9 @@ namespace RarZipProcessor
             if (rarVolumes.Count > 0)
             {
                 string firstRar = GetFirstRarFromPaths(rarVolumes.Select(rv => rv.entryPath));
+                string outputDir = _outputPath ?? folder;
                 Console.WriteLine($"    First volume would be: {firstRar}");
-                Console.WriteLine($"    RAR extraction would output to: {folder}/");
+                Console.WriteLine($"    RAR extraction would output to: {outputDir}/");
                 Console.WriteLine();
 
                 Console.WriteLine($"    RAR files found:");
@@ -273,11 +309,13 @@ namespace RarZipProcessor
                 var filesByZip = allEntries.GroupBy(e => e.zipName)
                     .ToDictionary(g => g.Key, g => g.ToList());
 
-                Console.WriteLine($"  -- Re-zip: all {zipFiles.Length} folder(s) would be re-zipped.");
+                Console.WriteLine($"  -- Re-zip: all {zipFiles.Length} folder(s) would be re-zipped to {(_outputPath ?? "root folder")}");
+                string outputDir = _outputPath ?? folder;
                 foreach (string zipPath in zipFiles.OrderBy(z => z, StringComparer.OrdinalIgnoreCase))
                 {
                     string baseName = Path.GetFileNameWithoutExtension(zipPath);
-                    Console.WriteLine($"    {Path.GetFileName(zipPath)} -> {baseName}.zip");
+                    string outputZipPath = Path.Combine(outputDir, $"{baseName}.zip");
+                    Console.WriteLine($"    {Path.GetFileName(zipPath)} -> {Path.GetFileName(outputZipPath)}");
                     Console.WriteLine($"      (from {baseName}/ subfolder)");
 
                     // List files that would be in the re-zipped version.
@@ -454,7 +492,7 @@ namespace RarZipProcessor
                                 continue;
                             }
 
-                            if (IsRarVolume(file))
+                             if (IsRarVolume(file))
                             {
                                 // RAR volume - move to partsDir for extraction.
                                 string relativePath = _useSubfolder
@@ -471,16 +509,34 @@ namespace RarZipProcessor
                             }
                             else
                             {
-                                // Non-RAR file - move back to its original subfolder.
-                                string relativePath = _useSubfolder
+                                // Non-RAR file.
+                                string? targetOutputDir = _outputPath ?? folder;
+                                bool preserveSubfolder = _useSubfolder && _outputPath != null;
+                                string relativePath = preserveSubfolder
                                     ? Path.GetRelativePath(zipExtractDir, file)
                                     : Path.GetFileName(file);
-                                string destPath = Path.Combine(zipExtractDir, relativePath);
-                                destPath = MakeUniquePath(destPath);
-                                string? parentDir = Path.GetDirectoryName(destPath);
-                                if (!string.IsNullOrEmpty(parentDir) && parentDir != zipExtractDir && !Directory.Exists(parentDir))
+                                string destPath;
+                                if (_reZip)
                                 {
-                                    Directory.CreateDirectory(parentDir);
+                                    // When re-zipping, move back to subfolder (will be zipped up).
+                                    destPath = Path.Combine(zipExtractDir, relativePath);
+                                    destPath = MakeUniquePath(destPath);
+                                    string? parentDir = Path.GetDirectoryName(destPath);
+                                    if (!string.IsNullOrEmpty(parentDir) && parentDir != zipExtractDir && !Directory.Exists(parentDir))
+                                    {
+                                        Directory.CreateDirectory(parentDir);
+                                    }
+                                }
+                                else
+                                {
+                                    // When not re-zipping, move to output directory (or flat).
+                                    destPath = Path.Combine(targetOutputDir, relativePath);
+                                    destPath = MakeUniquePath(destPath);
+                                    string? parentDir = Path.GetDirectoryName(destPath);
+                                    if (!string.IsNullOrEmpty(parentDir) && !Directory.Exists(parentDir))
+                                    {
+                                        Directory.CreateDirectory(parentDir);
+                                    }
                                 }
                                 File.Move(file, destPath);
                             }
@@ -518,6 +574,7 @@ namespace RarZipProcessor
 
                 // 3. Locate the first volume of the multi-part rar set.
                 string[] rarParts = Directory.GetFiles(partsDir, "*.r*", SearchOption.TopDirectoryOnly);
+                string outputDir = _outputPath ?? folder;
                 if (rarParts.Length == 0)
                 {
                     Console.WriteLine("  [WARN] No rar parts found after extracting zips. Skipping extraction step.");
@@ -526,15 +583,15 @@ namespace RarZipProcessor
                 {
                     string mainRar = FindFirstRarVolume(rarParts);
                     Console.WriteLine($"  Extracting rar set starting at: {Path.GetFileName(mainRar)}");
-                    RunRarExtraction(extractorPath, mainRar, folder);
+                    RunRarExtraction(extractorPath, mainRar, outputDir);
                 }
 
                 // 4. Keep exactly one nfo file (prefer one we set aside; otherwise whatever
-                //    the rar extraction may have produced directly into 'folder').
+                //    the rar extraction may have produced directly into 'outputDir').
                 nfoCandidates.AddRange(
-                    Directory.GetFiles(folder, "*.nfo", SearchOption.TopDirectoryOnly));
+                    Directory.GetFiles(outputDir, "*.nfo", SearchOption.TopDirectoryOnly));
 
-                KeepOneNfo(folder, nfoCandidates);
+                KeepOneNfo(outputDir, nfoCandidates);
 
                 // 5. Cleanup: remove the original zips, the per-zip extraction folders, and partsDir.
                 //foreach (string zipPath in zipFiles)
@@ -545,11 +602,12 @@ namespace RarZipProcessor
                 if (_reZip)
                 {
                     // When re-zipping, zip up each per-zip subfolder instead of deleting.
+                    string? rezipOutputDir = _outputPath ?? folder;
                     foreach (string zipExtractDir in extractedZipFolders)
                     {
                         string baseName = Path.GetFileName(zipExtractDir);
-                        string zipPath = Path.Combine(folder, $"{baseName}.zip");
-                        Console.WriteLine($"  Re-zipping: {zipExtractDir} -> {Path.GetFileName(zipPath)}");
+                        string zipPath = Path.Combine(rezipOutputDir, $"{baseName}.zip");
+                        Console.WriteLine($"  Re-zipping: {Path.GetFileName(zipExtractDir)} -> {Path.GetFileName(zipPath)}");
                         CreateZipFromFolder(zipExtractDir, zipPath);
                         SafeDeleteDirectory(zipExtractDir);
                     }
