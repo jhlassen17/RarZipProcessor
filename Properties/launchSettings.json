@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "RarZipProcessor": {
+      "commandName": "Project",
+      "commandLineArgs": "\"H:\\jeff\\files\\eBooks\""
+    },
+    "Abandoned Dry": {
+      "commandName": "Project",
+      "commandLineArgs": "\"G:\\jeff\\files\\Downloads\\forensic\\~user\\Downloads\\Torrentleech Pc Retro Pack 1993\" --dry-run --reZip --subfolder"
+    }
+  }
+}
