@@ -7,6 +7,22 @@
     "Abandoned Dry": {
       "commandName": "Project",
       "commandLineArgs": "\"G:\\jeff\\files\\Downloads\\forensic\\~user\\Downloads\\Torrentleech Pc Retro Pack 1993\" --dry-run --reZip --subfolder --output \"M:\\jeff\\files\\Games\\tmp\""
+    },
+    "Abandoned Full": {
+      "commandName": "Project",
+      "commandLineArgs": "\"G:\\jeff\\files\\Downloads\\forensic\\~user\\Downloads\\Torrentleech Pc Retro Pack 1993\" --reZip --subfolder --output \"M:\\jeff\\files\\Games\\tmp\""
+    },
+    "Full Test 02": {
+      "commandName": "Project",
+      "commandLineArgs": "\"M:\\jeff\\files\\Games\\jd\" --reZip --subfolder --output \"M:\\jeff\\files\\Games\\tmp\""
+    },
+    "Video": {
+      "commandName": "Project",
+      "commandLineArgs": "\"L:\\jeff\\files\\NZB\\complete\\Crystal.Lake.S01.GERMAN.DL.720P.WEB.H264-WAYNE\" --subfolder"
+    },
+    "Full Test 03": {
+      "commandName": "Project",
+      "commandLineArgs": "\"M:\\jeff\\files\\Downloads\\extracted\\ibm_pc_floppy_disk_images\\ibm_pc_floppy_disk_images\\floppy_disk_images\" --reZip --subfolder --output \"M:\\jeff\\files\\Games\\tmp\""
     }
   }
 }
