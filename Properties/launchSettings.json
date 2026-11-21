@@ -22,7 +22,7 @@
     },
     "Full Test 03": {
       "commandName": "Project",
-      "commandLineArgs": "\"M:\\jeff\\files\\Downloads\\extracted\\ibm_pc_floppy_disk_images\\ibm_pc_floppy_disk_images\\floppy_disk_images\" --reZip --subfolder --output \"M:\\jeff\\files\\Games\\tmp\""
+      "commandLineArgs": "\"M:\\jeff\\files\\Games\\ibm_pc_floppy_disk_images\\floppy_disk_images\" --reZip --subfolder --output \"M:\\jeff\\files\\Games\\tmp\""
     }
   }
 }

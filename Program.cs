@@ -703,6 +703,7 @@ namespace RarZipProcessor
             Console.WriteLine($"[FOLDER] {folder}  ({zipFiles.Length} zip file(s))");
 
             var extractedZipFolders = new List<string>();
+            var zipPaths = new List<string>();
             string partsDir = Path.Combine(folder, "_rzp_parts_" + Guid.NewGuid().ToString("N"));
             var nfoCandidates = new List<string>();
 
@@ -726,6 +727,7 @@ namespace RarZipProcessor
                     Console.WriteLine($"  Extracting zip: {Path.GetFileName(zipPath)} -> {Path.GetFileName(zipExtractDir)}");
                     ZipFile.ExtractToDirectory(zipPath, zipExtractDir);
                     extractedZipFolders.Add(zipExtractDir);
+                    zipPaths.Add(zipPath);
                 }
 
                 // 2. Move all files out of the per-zip folders. Rar volumes go into partsDir;
@@ -898,138 +900,94 @@ namespace RarZipProcessor
 
                 if (_reZip)
                 {
-                    // When re-zipping, merge all per-zip subfolders into one ZIP named after the folder.
+                    // When re-zipping, create ONE output ZIP per original source ZIP.
                     string? rezipOutputDir = _outputPath ?? folder;
-                    string folderName = Path.GetFileName(folder);
-                    string zipPath = Path.Combine(rezipOutputDir, $"{folderName}.zip");
-                    Console.WriteLine($"  [debug] Output directory: {(_outputPath ?? "same as source folder")}");
-                    Console.WriteLine($"  [debug] Output ZIP path: {zipPath}");
-                    Console.WriteLine($"  [debug] Re-zipping all subfolders -> {Path.GetFileName(zipPath)}");
+                    Console.WriteLine($"  Output directory: {(_outputPath ?? "same as source folder")}");
 
-                        // Collect all files from all subfolders into a temporary staging folder.
+                    // Iterate over each (original ZIP, extracted folder) pair.
+                    // These were tracked during extraction, so we know the exact mapping.
+                    for (int i = 0; i < zipPaths.Count; i++)
+                    {
+                        string originalZipPath = zipPaths[i];
+                        string extractedFolder = extractedZipFolders[i];
+
+                        // Determine the output ZIP path: use the original source file name.
+                        // E.g., "Archive.part1.zip" → output to "Archive.part1.zip" or
+                        // "Archive.part1" → output to "Archive.part1". The base name is used
+                        // to give the output ZIP a meaningful name rather than the containing folder name.
+                        string baseName = Path.GetFileNameWithoutExtension(originalZipPath);
+                        string zipOutputPath = Path.Combine(rezipOutputDir, $"{baseName}.zip");
+
+                        // Check for output collision: if the file already exists, add a suffix.
+                        if (File.Exists(zipOutputPath))
+                        {
+                            int suffix = 1;
+                            string candidatePath = Path.Combine(rezipOutputDir, $"{baseName}_{suffix}.zip");
+                            while (File.Exists(candidatePath))
+                            {
+                                candidatePath = Path.Combine(rezipOutputDir, $"{baseName}_{++suffix}.zip");
+                            }
+                            zipOutputPath = candidatePath;
+                        }
+
+                        Console.WriteLine($"  Re-zipping: {Path.GetFileName(originalZipPath)} -> {Path.GetFileName(zipOutputPath)}");
+
+                        // Create a staging directory for this specific extracted folder.
                         string stagingDir = Path.Combine(folder, "_rzp_staging_" + Guid.NewGuid().ToString("N"));
                         try
                         {
                             Directory.CreateDirectory(stagingDir);
-                            foreach (string zipExtractDir in extractedZipFolders)
-                            {
-                                Console.WriteLine($"  Processing files from: {Path.GetFileName(zipExtractDir)}");
-                                // Move files from each subfolder into staging, preserving structure when --subfolder.
-                                foreach (string file in Directory.GetFiles(zipExtractDir, "*", SearchOption.AllDirectories))
-                                {
-                                    string fileName = Path.GetFileName(file).ToLowerInvariant();
-                                    // Skip metadata files that are common across ZIPs and would just overwrite each other.
-                                    if (fileName == "file_id.diz" || fileName == "disk.id")
-                                    {
-                                        Console.WriteLine($"    [skip] {Path.GetFileName(file)} (metadata file, excluded from re-zip)");
-                                        continue;
-                                    }
 
-                                     string ext = Path.GetExtension(file).ToLowerInvariant();
-                                      if (ext == ".zip")
-                                      {
-                                          // Recursively extract this ZIP and collect its contents.
-                                          Console.WriteLine($"    [recursive] Extracting nested ZIP: {Path.GetFileName(file)}");
-                                          ExtractZipRecursive(file, stagingDir, extractorPath);
-                                      }
-                                     else if (IsRarVolume(file))
-                                     {
-                                         // RAR volume - move to partsDir for extraction.
-                                         string relativePath = _useSubfolder
-                                             ? Path.GetRelativePath(zipExtractDir, file)
-                                             : Path.GetFileName(file);
-                                         string destPath = Path.Combine(partsDir, relativePath);
-                                         destPath = MakeUniquePath(destPath);
-                                         string? parentDir = Path.GetDirectoryName(destPath);
-                                         if (!string.IsNullOrEmpty(parentDir) && parentDir != partsDir && !Directory.Exists(parentDir))
-                                         {
-                                             Directory.CreateDirectory(parentDir);
-                                         }
-                                         Console.WriteLine($"    [rar-extract] Moving to RAR extraction: {Path.GetFileName(file)}");
-                                         File.Move(file, destPath);
-                                     }
-                                     else
-                                     {
-                                         string relativePath = _useSubfolder
-                                             ? Path.GetRelativePath(zipExtractDir, file)
-                                             : Path.GetFileName(file);
-                                         string destPath = Path.Combine(stagingDir, relativePath);
-                                         destPath = MakeUniquePath(destPath);
-                                         string? parentDir = Path.GetDirectoryName(destPath);
-                                         if (!string.IsNullOrEmpty(parentDir) && !Directory.Exists(parentDir))
-                                         {
-                                             Directory.CreateDirectory(parentDir);
-                                         }
-                                         File.Move(file, destPath);
-                                     }
+                            // Process files from THIS extracted folder only.
+                            Console.WriteLine($"    Processing: {Path.GetFileName(extractedFolder)}");
+                            foreach (string file in Directory.GetFiles(extractedFolder, "*", SearchOption.AllDirectories))
+                            {
+                                string fileName = Path.GetFileName(file).ToLowerInvariant();
+
+                                // Skip metadata files.
+                                if (fileName == "file_id.diz" || fileName == "disk.id")
+                                {
+                                    Console.WriteLine($"      [skip] {Path.GetFileName(file)} (metadata)");
+                                    continue;
                                 }
-                                // Delete the individual subfolder.
-                                SafeDeleteDirectory(zipExtractDir);
-                            }
 
-                            // When --output is set, also collect files from output directory.
-                            if (_outputPath != null)
-                            {
-                                Console.WriteLine($"  Processing files from output directory: {outputDir}");
-                                // Move files from output directory into staging.
-                                foreach (string file in Directory.GetFiles(outputDir, "*", SearchOption.AllDirectories))
+                                string ext = Path.GetExtension(file).ToLowerInvariant();
+
+                                if (ext == ".zip")
                                 {
-                                    string fileName = Path.GetFileName(file).ToLowerInvariant();
-                                    // Skip metadata files that are common across ZIPs and would just overwrite each other.
-                                    if (fileName == "file_id.diz" || fileName == "disk.id")
+                                    // Recursively extract nested ZIP and collect its contents.
+                                    Console.WriteLine($"      [nested-zip] Extracting: {Path.GetFileName(file)}");
+                                    ExtractZipRecursive(file, stagingDir, extractorPath);
+                                }
+                                else
+                                {
+                                    // Move regular file to this folder's staging area.
+                                    string relativePath = _useSubfolder
+                                        ? Path.GetRelativePath(extractedFolder, file)
+                                        : Path.GetFileName(file);
+                                    string destPath = Path.Combine(stagingDir, relativePath);
+                                    destPath = MakeUniquePath(destPath);
+                                    string? parentDir = Path.GetDirectoryName(destPath);
+                                    if (!string.IsNullOrEmpty(parentDir) && !Directory.Exists(parentDir))
                                     {
-                                        Console.WriteLine($"    [skip] {Path.GetFileName(file)} (metadata file, excluded from re-zip)");
-                                        continue;
+                                        Directory.CreateDirectory(parentDir);
                                     }
-
-                                    string ext = Path.GetExtension(file).ToLowerInvariant();
-                                    if (ext == ".zip")
-                                    {
-                                        // Recursively extract this ZIP and collect its contents.
-                                        Console.WriteLine($"    [recursive] Extracting nested ZIP: {Path.GetFileName(file)}");
-                                        ExtractZipRecursive(file, stagingDir, extractorPath);
-                                    }
-                                    else if (IsRarVolume(file))
-                                    {
-                                        // RAR volume - move to partsDir for extraction.
-                                        string relativePath = _useSubfolder
-                                            ? Path.GetRelativePath(outputDir, file)
-                                            : Path.GetFileName(file);
-                                        string destPath = Path.Combine(partsDir, relativePath);
-                                        destPath = MakeUniquePath(destPath);
-                                        string? parentDir = Path.GetDirectoryName(destPath);
-                                        if (!string.IsNullOrEmpty(parentDir) && parentDir != partsDir && !Directory.Exists(parentDir))
-                                        {
-                                            Directory.CreateDirectory(parentDir);
-                                        }
-                                        Console.WriteLine($"    [rar-extract] Moving to RAR extraction: {Path.GetFileName(file)}");
-                                        File.Move(file, destPath);
-                                    }
-                                    else
-                                    {
-                                        // Non-RAR, non-ZIP file.
-                                        string relativePath = _useSubfolder
-                                            ? Path.GetRelativePath(outputDir, file)
-                                            : Path.GetFileName(file);
-                                        string destPath = Path.Combine(stagingDir, relativePath);
-                                        destPath = MakeUniquePath(destPath);
-                                        string? parentDir = Path.GetDirectoryName(destPath);
-                                        if (!string.IsNullOrEmpty(parentDir) && !Directory.Exists(parentDir))
-                                        {
-                                            Directory.CreateDirectory(parentDir);
-                                        }
-                                        File.Move(file, destPath);
-                                    }
+                                    File.Move(file, destPath);
                                 }
                             }
 
-                            // Create the merged ZIP.
-                            CreateZipFromFolder(stagingDir, zipPath);
+                            // Delete the extracted folder (already emptied).
+                            SafeDeleteDirectory(extractedFolder);
+
+                            // Create the output ZIP for this specific source ZIP.
+                            Console.WriteLine($"      Creating: {Path.GetFileName(zipOutputPath)}");
+                            CreateZipFromFolder(stagingDir, zipOutputPath);
                         }
                         finally
                         {
                             SafeDeleteDirectory(stagingDir);
                         }
+                    }
                 }
                 else
                 {
